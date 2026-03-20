@@ -1,0 +1,17 @@
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Builds/Deps
+**/node_modules/
+**/dist/
+*.tsbuildinfo
+.pnpm-store/
+**/.ports.json
