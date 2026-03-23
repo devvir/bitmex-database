@@ -82,13 +82,29 @@ export type TableTypeMap = {
   [BitmexTable.QuoteBin1d]: Schema['Quote'];
   [BitmexTable.Settlement]: Schema['Settlement'];
   [BitmexTable.Trade]: Schema['Trade'];
-  [BitmexTable.TradeBin1m]: Schema['Trade'];
-  [BitmexTable.TradeBin5m]: Schema['Trade'];
-  [BitmexTable.TradeBin1h]: Schema['Trade'];
-  [BitmexTable.TradeBin1d]: Schema['Trade'];
+  [BitmexTable.TradeBin1m]: Schema['TradeBin'];
+  [BitmexTable.TradeBin5m]: Schema['TradeBin'];
+  [BitmexTable.TradeBin1h]: Schema['TradeBin'];
+  [BitmexTable.TradeBin1d]: Schema['TradeBin'];
   [BitmexTable.Transact]: Schema['Transaction'];
   [BitmexTable.Wallet]: Schema['Wallet'];
 };
+
+// ── Swagger field types ───────────────────────────────────────────────────────
+
+/** The set of field type strings used in the `types` metadata of partial messages. */
+export type BitmexFieldType =
+  | 'boolean'
+  | 'string'
+  | 'number'
+  | 'object'
+  | 'array'
+  | 'date-time'
+  | 'double'
+  | 'guid'
+  | 'int32'
+  | 'int64'
+  | 'JSON';
 
 // ── Message types ─────────────────────────────────────────────────────────────
 
@@ -103,22 +119,46 @@ export type TableTypeMap = {
  */
 export type BitmexMessage<T = Record<string, unknown>> =
   | {
-      table: string;
+      table: BitmexTable;
       action: 'partial';
       keys: (keyof T & string)[];
-      types: Record<string, string>;
+      types: Record<keyof T & string, BitmexFieldType>;
       data: T[];
     }
   | {
-      table: string;
+      table: BitmexTable;
       action: 'insert';
       data: T[];
     }
   | {
-      table: string;
+      table: BitmexTable;
       action: 'update' | 'delete';
       data: Partial<T>[];
     };
+
+/** A partial message — the first message for a table, carries metadata. */
+export type PartialMessage<T> = Extract<BitmexMessage<T>, { action: 'partial' }>;
+
+/** A delta message — insert, update, or delete. */
+export type DeltaMessage<T> = Exclude<BitmexMessage<T>, { action: 'partial' }>;
+
+// ── Internal state types ──────────────────────────────────────────────────────
+
+/** Internal state for a single table. Keyed tables use Map; insert-only tables use array. */
+export interface TableState<T> {
+  table: BitmexTable;
+  keys: (keyof T & string)[];
+  types: Record<keyof T & string, BitmexFieldType>;
+  data: Map<string, T> | T[];
+  /** Per-symbol index for insert-only tables. One entry per symbol (or one total if no symbol). */
+  symbolIndex?: Map<string, T>;
+}
+
+/** Minimal interface for heterogeneous table storage inside Database. */
+export interface StoredTable {
+  apply(message: BitmexMessage): void;
+  snapshot(): unknown[];
+}
 
 // ── Public API types ──────────────────────────────────────────────────────────
 
@@ -126,7 +166,7 @@ export type BitmexMessage<T = Record<string, unknown>> =
 export interface TableView<T> {
   table: BitmexTable;
   keys: (keyof T & string)[];
-  types: Record<string, string>;
+  types: Record<keyof T & string, BitmexFieldType>;
   data: Iterable<Readonly<T>>;
 }
 

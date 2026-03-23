@@ -1,21 +1,15 @@
 import type {
+  BitmexFieldType,
   BitmexMessage,
   BitmexTable,
   Database as IDatabase,
   DatabaseSnapshot,
+  StoredTable,
   Table,
   TableTypeMap,
   TableView,
 } from './types.js';
 import { createTable } from './table.js';
-
-// ── StoredTable ───────────────────────────────────────────────────────────────
-
-/** Minimal interface for heterogeneous table storage. Only what Database needs internally. */
-interface StoredTable {
-  apply(message: BitmexMessage): void;
-  snapshot(): unknown[];
-}
 
 // ── Factory ───────────────────────────────────────────────────────────────────
 
@@ -38,9 +32,9 @@ class Database implements IDatabase {
   }
 
   apply(message: BitmexMessage): void {
-    const name = message.table as BitmexTable;
+    const name = message.table;
 
-    if (message.action === 'partial' && !this.#tables.has(name)) {
+    if (message.action === 'partial' && ! this.#tables.has(name)) {
       this.#tables.set(name, createTable(name) as unknown as StoredTable);
     }
 
@@ -72,11 +66,11 @@ class Database implements IDatabase {
   view<K extends BitmexTable>(table: K): TableView<TableTypeMap[K]> {
     const t = this.#getTable(table);
 
-    if (!t) {
+    if (! t) {
       return {
         table: table,
         keys: [],
-        types: {},
+        types: {} as Record<keyof TableTypeMap[K] & string, BitmexFieldType>,
         data: {
           [Symbol.iterator]() {
             return [][Symbol.iterator]();

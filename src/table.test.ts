@@ -17,7 +17,7 @@ interface TestOrder {
 type OrderMsg = BitmexMessage<TestOrder>;
 
 const orderPartial = (data: TestOrder[]): OrderMsg => ({
-  table: 'order',
+  table: BitmexTable.Order,
   action: 'partial',
   keys: ['orderID'],
   types: { orderID: 'guid', price: 'float' },
@@ -25,19 +25,19 @@ const orderPartial = (data: TestOrder[]): OrderMsg => ({
 });
 
 const orderInsert = (data: TestOrder[]): OrderMsg => ({
-  table: 'order',
+  table: BitmexTable.Order,
   action: 'insert',
   data,
 });
 
 const orderUpdate = (data: Partial<TestOrder>[]): OrderMsg => ({
-  table: 'order',
+  table: BitmexTable.Order,
   action: 'update',
   data,
 });
 
 const orderDelete = (data: Partial<TestOrder>[]): OrderMsg => ({
-  table: 'order',
+  table: BitmexTable.Order,
   action: 'delete',
   data,
 });

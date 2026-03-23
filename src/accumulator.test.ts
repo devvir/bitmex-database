@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { applyDelta, newState, toIterable, toSnapshot } from './accumulator.js';
+import { BitmexTable } from './types.js';
 import type { BitmexMessage } from './types.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -12,6 +13,7 @@ interface Order {
 }
 
 interface Trade {
+  symbol: string;
   timestamp: string;
   price: number;
 }
@@ -20,7 +22,7 @@ type OrderMsg = BitmexMessage<Order>;
 type TradeMsg = BitmexMessage<Trade>;
 
 const partial = (data: Order[]): Extract<OrderMsg, { action: 'partial' }> => ({
-  table: 'order',
+  table: BitmexTable.Order,
   action: 'partial',
   keys: ['orderID'] as (keyof Order & string)[],
   types: { orderID: 'guid', price: 'float', qty: 'long' },
@@ -28,33 +30,33 @@ const partial = (data: Order[]): Extract<OrderMsg, { action: 'partial' }> => ({
 });
 
 const insert = (data: Order[]): Extract<OrderMsg, { action: 'insert' }> => ({
-  table: 'order',
+  table: BitmexTable.Order,
   action: 'insert',
   data,
 });
 
 const update = (data: Partial<Order>[]): Extract<OrderMsg, { action: 'update' }> => ({
-  table: 'order',
+  table: BitmexTable.Order,
   action: 'update',
   data,
 });
 
 const del = (data: Partial<Order>[]): Extract<OrderMsg, { action: 'delete' }> => ({
-  table: 'order',
+  table: BitmexTable.Order,
   action: 'delete',
   data,
 });
 
 const tradePartial = (data: Trade[]): Extract<TradeMsg, { action: 'partial' }> => ({
-  table: 'trade',
+  table: BitmexTable.Trade,
   action: 'partial',
   keys: [] as (keyof Trade & string)[],
-  types: { timestamp: 'timespan', price: 'float' },
+  types: { symbol: 'string', timestamp: 'date-time', price: 'double' },
   data,
 });
 
 const tradeInsert = (data: Trade[]): Extract<TradeMsg, { action: 'insert' }> => ({
-  table: 'trade',
+  table: BitmexTable.Trade,
   action: 'insert',
   data,
 });
@@ -83,8 +85,8 @@ describe('newState', () => {
 
   it('builds an array for insert-only tables (no keys)', () => {
     const trades: Trade[] = [
-      { timestamp: 't1', price: 100 },
-      { timestamp: 't2', price: 200 },
+      { symbol: 'XBTUSD', timestamp: 't1', price: 100 },
+      { symbol: 'ETHUSD', timestamp: 't2', price: 200 },
     ];
 
     const state = newState<Trade>(tradePartial(trades));
@@ -97,7 +99,7 @@ describe('newState', () => {
     type Level = { symbol: string; id: number; side: string; size: number };
 
     const msg: Extract<BitmexMessage<Level>, { action: 'partial' }> = {
-      table: 'orderBookL2',
+      table: BitmexTable.OrderBookL2,
       action: 'partial',
       keys: ['symbol', 'id', 'side'] as (keyof Level & string)[],
       types: {},
@@ -187,25 +189,54 @@ describe('applyDelta (keyed table)', () => {
 // ── applyDelta — insert-only table ───────────────────────────────────────────
 
 describe('applyDelta (insert-only table)', () => {
-  it('appends items on insert', () => {
-    const state = newState<Trade>(tradePartial([{ timestamp: 't1', price: 100 }]));
+  it('keeps one entry per symbol — latest wins', () => {
+    const state = newState<Trade>(tradePartial([{ symbol: 'XBTUSD', timestamp: 't1', price: 100 }]));
 
-    applyDelta(state, tradeInsert([{ timestamp: 't2', price: 200 }]));
+    applyDelta(state, tradeInsert([{ symbol: 'XBTUSD', timestamp: 't2', price: 200 }]));
+
+    expect((state.data as Trade[]).length).toBe(1);
+    expect((state.data as Trade[])[0]).toEqual({ symbol: 'XBTUSD', timestamp: 't2', price: 200 });
+  });
+
+  it('keeps separate entries for different symbols', () => {
+    const state = newState<Trade>(tradePartial([{ symbol: 'XBTUSD', timestamp: 't1', price: 100 }]));
+
+    applyDelta(state, tradeInsert([{ symbol: 'ETHUSD', timestamp: 't2', price: 50 }]));
 
     expect((state.data as Trade[]).length).toBe(2);
-    expect((state.data as Trade[])[1]).toEqual({ timestamp: 't2', price: 200 });
+  });
+
+  it('keeps exactly one entry when items have no symbol field', () => {
+    interface Tick { ts: string; value: number }
+    type TickMsg = BitmexMessage<Tick>;
+
+    const tickPartial = (data: Tick[]): Extract<TickMsg, { action: 'partial' }> => ({
+      table: BitmexTable.Trade,
+      action: 'partial',
+      keys: [] as (keyof Tick & string)[],
+      types: { ts: 'date-time', value: 'double' },
+      data,
+    });
+
+    const state = newState<Tick>(tickPartial([{ ts: 't1', value: 1 }]));
+
+    applyDelta(state, { table: BitmexTable.Trade, action: 'insert', data: [{ ts: 't2', value: 2 }] });
+    applyDelta(state, { table: BitmexTable.Trade, action: 'insert', data: [{ ts: 't3', value: 3 }] });
+
+    expect((state.data as Tick[]).length).toBe(1);
+    expect((state.data as Tick[])[0]).toEqual({ ts: 't3', value: 3 });
   });
 
   it('ignores update and delete actions', () => {
-    const state = newState<Trade>(tradePartial([{ timestamp: 't1', price: 100 }]));
+    const state = newState<Trade>(tradePartial([{ symbol: 'XBTUSD', timestamp: 't1', price: 100 }]));
 
     const upd: Extract<TradeMsg, { action: 'update' }> = {
-      table: 'trade',
+      table: BitmexTable.Trade,
       action: 'update',
       data: [{ price: 999 }],
     };
     const dlt: Extract<TradeMsg, { action: 'delete' }> = {
-      table: 'trade',
+      table: BitmexTable.Trade,
       action: 'delete',
       data: [{ timestamp: 't1' }],
     };
@@ -215,27 +246,6 @@ describe('applyDelta (insert-only table)', () => {
 
     expect((state.data as Trade[]).length).toBe(1);
     expect((state.data as Trade[])[0]!.price).toBe(100);
-  });
-
-  it('trims to MAX_ITEMS when buffer overflows', () => {
-    const state = newState<Trade>(tradePartial([]));
-
-    const batch = Array.from(
-      { length: 11_100 },
-      (_, i): Extract<TradeMsg, { action: 'insert' }> => ({
-        table: 'trade',
-        action: 'insert',
-        data: [{ timestamp: String(i), price: i }],
-      })
-    );
-
-    for (const msg of batch) {
-      applyDelta(state, msg);
-    }
-
-    // Trim fires at > 11_000; after trimming to 10_000 plus remaining inserts
-    // the buffer must stay well below the unbounded growth limit (< 11_000).
-    expect((state.data as Trade[]).length).toBeLessThan(11_000);
   });
 });
 
@@ -262,12 +272,12 @@ describe('toSnapshot', () => {
   });
 
   it('returns an array copy for insert-only table', () => {
-    const state = newState<Trade>(tradePartial([{ timestamp: 't1', price: 100 }]));
+    const state = newState<Trade>(tradePartial([{ symbol: 'XBTUSD', timestamp: 't1', price: 100 }]));
 
     const snap = toSnapshot(state);
 
     expect(snap).toHaveLength(1);
-    expect(snap[0]).toEqual({ timestamp: 't1', price: 100 });
+    expect(snap[0]).toEqual({ symbol: 'XBTUSD', timestamp: 't1', price: 100 });
   });
 
   it('is a deep copy — mutating the snapshot does not affect internal state', () => {
@@ -311,8 +321,8 @@ describe('toIterable', () => {
   it('yields all items from insert-only table', () => {
     const state = newState<Trade>(
       tradePartial([
-        { timestamp: 't1', price: 100 },
-        { timestamp: 't2', price: 200 },
+        { symbol: 'XBTUSD', timestamp: 't1', price: 100 },
+        { symbol: 'ETHUSD', timestamp: 't2', price: 200 },
       ])
     );
 
