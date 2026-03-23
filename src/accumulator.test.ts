@@ -119,7 +119,7 @@ describe('applyDelta (keyed table)', () => {
   it('inserts a new item', () => {
     const state = newState<Order>(partial([{ orderID: 'A', price: 100, qty: 10 }]));
 
-    applyDelta(state, insert([{ orderID: 'B', price: 200, qty: 20 }]), false, 10_000);
+    applyDelta(state, insert([{ orderID: 'B', price: 200, qty: 20 }]), 10_000);
 
     const map = state.data as Map<string, Order>;
 
@@ -130,7 +130,7 @@ describe('applyDelta (keyed table)', () => {
   it('updates existing item by merging delta fields', () => {
     const state = newState<Order>(partial([{ orderID: 'A', price: 100, qty: 10 }]));
 
-    applyDelta(state, update([{ orderID: 'A', price: 150 }]), false, 10_000);
+    applyDelta(state, update([{ orderID: 'A', price: 150 }]), 10_000);
 
     const item = (state.data as Map<string, Order>).get('A')!;
 
@@ -143,7 +143,7 @@ describe('applyDelta (keyed table)', () => {
 
     const before = (state.data as Map<string, Order>).get('A')!;
 
-    applyDelta(state, update([{ orderID: 'A', price: 999 }]), false, 10_000);
+    applyDelta(state, update([{ orderID: 'A', price: 999 }]), 10_000);
 
     const after = (state.data as Map<string, Order>).get('A')!;
 
@@ -159,7 +159,7 @@ describe('applyDelta (keyed table)', () => {
       ])
     );
 
-    applyDelta(state, del([{ orderID: 'A' }]), false, 10_000);
+    applyDelta(state, del([{ orderID: 'A' }]), 10_000);
 
     const map = state.data as Map<string, Order>;
 
@@ -167,20 +167,20 @@ describe('applyDelta (keyed table)', () => {
     expect(map.size).toBe(1);
   });
 
-  it('update on unknown id inserts the item', () => {
+  it('update on unknown id drops the item', () => {
     const state = newState<Order>(partial([]));
 
-    applyDelta(state, update([{ orderID: 'X', price: 50, qty: 5 }]), false, 10_000);
+    applyDelta(state, update([{ orderID: 'X', price: 50, qty: 5 }]), 10_000);
 
     const map = state.data as Map<string, Order>;
 
-    expect(map.has('X')).toBe(true);
+    expect(map.has('X')).toBe(false);
   });
 
   it('delete on unknown id is a no-op', () => {
     const state = newState<Order>(partial([{ orderID: 'A', price: 100, qty: 10 }]));
 
-    applyDelta(state, del([{ orderID: 'Z' }]), false, 10_000);
+    applyDelta(state, del([{ orderID: 'Z' }]), 10_000);
 
     expect((state.data as Map<string, Order>).size).toBe(1);
   });
@@ -192,7 +192,7 @@ describe('applyDelta (insert-only table) — wsPartialMode=true', () => {
   it('keeps one entry per symbol — latest wins', () => {
     const state = newState<Trade>(tradePartial([{ symbol: 'XBTUSD', timestamp: 't1', price: 100 }]), true);
 
-    applyDelta(state, tradeInsert([{ symbol: 'XBTUSD', timestamp: 't2', price: 200 }]), true, 10_000);
+    applyDelta(state, tradeInsert([{ symbol: 'XBTUSD', timestamp: 't2', price: 200 }]), 10_000);
 
     const map = state.data as Map<string, Trade>;
     expect(map.size).toBe(1);
@@ -202,7 +202,7 @@ describe('applyDelta (insert-only table) — wsPartialMode=true', () => {
   it('keeps separate entries for different symbols', () => {
     const state = newState<Trade>(tradePartial([{ symbol: 'XBTUSD', timestamp: 't1', price: 100 }]), true);
 
-    applyDelta(state, tradeInsert([{ symbol: 'ETHUSD', timestamp: 't2', price: 50 }]), true, 10_000);
+    applyDelta(state, tradeInsert([{ symbol: 'ETHUSD', timestamp: 't2', price: 50 }]), 10_000);
 
     expect((state.data as Map<string, Trade>).size).toBe(2);
   });
@@ -221,8 +221,8 @@ describe('applyDelta (insert-only table) — wsPartialMode=true', () => {
 
     const state = newState<Tick>(tickPartial([{ ts: 't1', value: 1 }]), true);
 
-    applyDelta(state, { table: BitmexTable.Trade, action: 'insert', data: [{ ts: 't2', value: 2 }] }, true, 10_000);
-    applyDelta(state, { table: BitmexTable.Trade, action: 'insert', data: [{ ts: 't3', value: 3 }] }, true, 10_000);
+    applyDelta(state, { table: BitmexTable.Trade, action: 'insert', data: [{ ts: 't2', value: 2 }] }, 10_000);
+    applyDelta(state, { table: BitmexTable.Trade, action: 'insert', data: [{ ts: 't3', value: 3 }] }, 10_000);
 
     expect((state.data as Map<string, Tick>).size).toBe(1);
     expect((state.data as Map<string, Tick>).get('')).toEqual({ ts: 't3', value: 3 });
@@ -242,8 +242,8 @@ describe('applyDelta (insert-only table) — wsPartialMode=true', () => {
       data: [{ timestamp: 't1' }],
     } as Extract<TradeMsg, { action: 'delete' }>;
 
-    applyDelta(state, upd, true, 10_000);
-    applyDelta(state, dlt, true, 10_000);
+    applyDelta(state, upd, 10_000);
+    applyDelta(state, dlt, 10_000);
 
     const map = state.data as Map<string, Trade>;
     expect(map.size).toBe(1);
@@ -255,7 +255,7 @@ describe('applyDelta (insert-only table) — wsPartialMode=false (accumulation)'
   it('appends items on insert (accumulation mode)', () => {
     const state = newState<Trade>(tradePartial([{ symbol: 'XBTUSD', timestamp: 't1', price: 100 }]));
 
-    applyDelta(state, tradeInsert([{ symbol: 'XBTUSD', timestamp: 't2', price: 200 }]), false, 10_000);
+    applyDelta(state, tradeInsert([{ symbol: 'XBTUSD', timestamp: 't2', price: 200 }]), 10_000);
 
     expect((state.data as Trade[]).length).toBe(2);
     expect((state.data as Trade[])[1]).toEqual({ symbol: 'XBTUSD', timestamp: 't2', price: 200 });
@@ -274,7 +274,7 @@ describe('applyDelta (insert-only table) — wsPartialMode=false (accumulation)'
     );
 
     for (const msg of batch) {
-      applyDelta(state, msg, false, 1000);
+      applyDelta(state, msg, 1000);
     }
 
     // With cap 1000, trim happens at 1200+. After trim, size is 1000.
@@ -297,7 +297,7 @@ describe('applyDelta (insert-only table) — wsPartialMode=false (accumulation)'
     );
 
     for (const msg of batch) {
-      applyDelta(state, msg, false, customCap);
+      applyDelta(state, msg, customCap);
     }
 
     // With cap 50, trim happens at 60+. Size can temporarily reach 60 before trim,
@@ -320,8 +320,8 @@ describe('applyDelta (insert-only table) — wsPartialMode=false (accumulation)'
       data: [{ timestamp: 't1' }],
     } as Extract<TradeMsg, { action: 'delete' }>;
 
-    applyDelta(state, upd, false, 10_000);
-    applyDelta(state, dlt, false, 10_000);
+    applyDelta(state, upd, 10_000);
+    applyDelta(state, dlt, 10_000);
 
     expect((state.data as Trade[]).length).toBe(1);
     expect((state.data as Trade[])[0]!.price).toBe(100);
@@ -424,7 +424,7 @@ describe('toIterable', () => {
 
     const iterable = toIterable(state);
 
-    applyDelta(state, insert([{ orderID: 'B', price: 200, qty: 20 }]), false, 10_000);
+    applyDelta(state, insert([{ orderID: 'B', price: 200, qty: 20 }]), 10_000);
 
     expect([...iterable]).toHaveLength(2);
   });
@@ -434,7 +434,7 @@ describe('toIterable', () => {
 
     const iterable = toIterable(state);
 
-    applyDelta(state, update([{ orderID: 'A', price: 999 }]), false, 10_000);
+    applyDelta(state, update([{ orderID: 'A', price: 999 }]), 10_000);
 
     const items = [...iterable] as Order[];
 

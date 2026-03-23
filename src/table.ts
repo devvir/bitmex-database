@@ -54,7 +54,7 @@ class Table<T extends BitmexTableType> implements ITable<T> {
 
     if (! this.#state) return;
 
-    applyDelta(this.#state, message, wsPartialMode, this.#capOnInsertOnly);
+    applyDelta(this.#state, message, this.#capOnInsertOnly, wsPartialMode);
   }
 
   #validate(message: BitmexMessage<T>): void {

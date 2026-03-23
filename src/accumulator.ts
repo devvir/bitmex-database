@@ -1,47 +1,67 @@
 import cloneDeep from 'lodash.clonedeep';
-import type { BitmexTableType, DeltaMessage, PartialMessage, TableState } from './types.js';
+import type { BitmexTable, BitmexTableType, DeltaMessage, PartialMessage, TableState } from './types.js';
 
-/** Build initial state from a partial message. */
-export function newState<T extends BitmexTableType>(message: PartialMessage<T>, wsPartialMode: boolean = false): TableState<T> {
+/**
+ * A few insert-only tables have keys, but should still be pruned selectively in wsPartialMode,
+ * usually keeping only one entry of a kind (symbol or currency). Fallback index for insert-only
+ * tables without keys is symbol (if they have it), or finally empty string.
+ *
+ * Notice that if wsPartialMode=false, insert-only tables will just accumulate up to defined cap.
+ */
+const INSERTONLY_TABLE_INDEX = {
+  funding: 'symbol',      // Original: timestamp, symbol
+  insurance: 'currency',  // Original: timestamp, currency
+  settlement: 'symbol',   // Original: timestamp, symbol
+} as Record<BitmexTable, string>;
+
+/**
+ * Build initial state from a message with action=partial.
+ */
+export function newState<T extends BitmexTableType>(
+  message: PartialMessage<T>,
+  wsPartialMode: boolean = false,
+): TableState<T> {
   const { table, keys, types, data } = message;
 
-  if (keys.length === 0 && ! wsPartialMode) {
+  /** Insert-only tables accumulate (up to max size) in non-wsPartial mode */
+  if (isInsertOnlyTable(table, keys) && ! wsPartialMode)
     return { table, keys, types, data: data as T[] };
-  }
 
+  /**
+   * Tables with update/delete (always), and insert-only tables in wsPartialMode are indexed
+   *   - update/delete: for performant lookups and updates
+   *   - insert-only: for trivial last-item replacement
+   */
   const index = new Map<string, T>();
 
-  for (const item of data) {
-    const indexingKey = keys.length ? keys : ['symbol'] as (keyof T & string)[];
-    index.set(makeKey(item, indexingKey), item as T);
-  }
+  for (const item of data)
+    index.set(makeIndexKey(table, item, keys), item as T);
 
   return { table, keys, types, data: index };
 }
 
-/** Apply an insert/update/delete delta to existing state. Mutates state in place. */
+/**
+ * Apply an insert/update/delete delta to existing state. Mutates state in place.
+ */
 export function applyDelta<T extends BitmexTableType>(
   state: TableState<T>,
   message: DeltaMessage<T>,
-  wsPartialMode: boolean,
   maxItems: number,
+  wsPartialMode: boolean = false,
 ): void {
-  // Standard delta-aggregation for tables with keys (take update and or/delete deltas)
-  if (state.keys.length > 0)
-    applyKeyed(state.data as Map<string, T>, state.keys, message);
+  // Announcement and Chat partials from the BitMEX WebSocket are always empty
+  if (wsPartialMode && ['announcement', 'chat'].includes(message.table)) return;
 
-  // BitMEX websocket partials mode: non-keyed (insert-only) tables keep 0-1 items per symbol (most recent)
-  else if (wsPartialMode)
-    keepMostRecent(state.data as Map<string, T>, message);
-
-  // Delta-server accumulation mode: non-keyed (insert-only) tables accumulate indefinitely (to a preset cap)
-  else
-    applyInsertOnly(state.data as T[], message, maxItems);
+  return state.data instanceof Map
+    ? applyIndexed(state.data as Map<string, T>, state.keys, message)
+    : applyNonIndexed(state.data as T[], message, maxItems);
 }
 
 // ── Public: snapshot + view helpers ──────────────────────────────────────────
 
-/** Return a deep copy of the state as a plain array. Safe to mutate freely. */
+/**
+ * Return a deep copy of the state as a plain array. Safe to mutate freely.
+ */
 export function toSnapshot<T>(state: TableState<T>): T[] {
   const items = state.data instanceof Map
     ? Array.from(state.data.values())
@@ -57,9 +77,8 @@ export function toSnapshot<T>(state: TableState<T>): T[] {
 export function toIterable<T>(state: TableState<T>): Iterable<Readonly<T>> {
   return {
     [Symbol.iterator]() {
-      if (state.data instanceof Map) {
+      if (state.data instanceof Map)
         return state.data.values();
-      }
 
       return state.data[Symbol.iterator]();
     },
@@ -71,32 +90,36 @@ export function toIterable<T>(state: TableState<T>): Iterable<Readonly<T>> {
 /**
  * Tables with keys (e.g. orderBookL2) apply inserts, updates and deletes in the traditional way, never
  * capping the max size nor "picking" what stays in any way: BitMex messages drive the state.
+ *
+ * Insert-only tables on wsPartialMode simulate keys (symbol or currency) to keep only most recent entry.
  */
-function applyKeyed<T extends BitmexTableType>(
+function applyIndexed<T extends BitmexTableType>(
   index: Map<string, T>,
   keys: (keyof T & string)[],
   message: DeltaMessage<T>,
 ): void {
-  if (message.action === 'insert') {
-    for (const item of message.data) {
-      index.set(makeKey(item as T, keys), item as T);
-    }
-  } else if (message.action === 'update') {
-    for (const item of message.data) {
-      const id = makeKey(item as Partial<T>, keys);
-      const existing = index.get(id);
+  switch (message.action) {
+    case 'insert':
+      for (const item of message.data)
+        index.set(makeIndexKey(message.table, item as T, keys), item as T);
+      break;
 
-      if (existing) {
-        Object.assign(existing, item);
-      } else {
-        // Update for unknown key — BitMEX sometimes sends updates before inserts.
-        index.set(id, item as T);
+    case 'update':
+      for (const item of message.data) {
+        const id = makeIndexKey(message.table, item as Partial<T>, keys);
+        const existing = index.get(id);
+
+        if (existing)
+          Object.assign(existing, item);
+        else
+          console.warn(`Received update for non-existing item in table ${message.table}.`);
       }
-    }
-  } else {
-    for (const item of message.data) {
-      index.delete(makeKey(item as Partial<T>, keys));
-    }
+      break;
+    case 'delete':
+      for (const item of message.data) {
+        index.delete(makeIndexKey(message.table, item as Partial<T>, keys));
+      }
+      break;
   }
 }
 
@@ -106,33 +129,31 @@ function applyKeyed<T extends BitmexTableType>(
  *
  * NOTE: to minimize overhead, purging is done when size reaches 120% of stated cap.
  */
-function applyInsertOnly<T extends BitmexTableType>(data: T[], message: DeltaMessage<T>, maxItems: number): void {
-  if (message.action !== 'insert') return;
+function applyNonIndexed<T extends BitmexTableType>(data: T[], message: DeltaMessage<T>, maxItems: number): void {
+  if (message.action !== 'insert')
+    return console.warn(`Invalid action ${message.action} for non-keyed table ${message.table}.`);
 
   data.push(...(message.data as T[]));
 
-  if (data.length > maxItems * 1.2) {
+  if (data.length > maxItems * 1.2)
     data.splice(0, data.length - maxItems);
-  }
-}
-
-/**
- * Keep at most 1 entry per symbol (the most recent), generating snapshots that mimic
- * BitMEX own partials for insert-only tables (trade, quote, bins, liquidation, etc.).
- *
- * Tables without a symbol keep a single item at most.
- */
-function keepMostRecent<T extends BitmexTableType>(index: Map<string, T>, message: DeltaMessage<T>): void {
-  if (message.action !== 'insert' || message.data.length === 0) return;
-
-  const key = 'symbol' in message.data[0] ? message.data[0].symbol as string : '';
-
-  for (const item of message.data)
-    index.set(key, item as T);
 }
 
 // ── Private: helpers ──────────────────────────────────────────────────────────
 
-function makeKey<T>(item: T | Partial<T>, keys: (keyof T & string)[]): string {
-  return keys.map((k) => item[k]).join('|');
+function isInsertOnlyTable(table: BitmexTable, keys: (keyof any & string)[]): boolean {
+  return keys.length === 0 || table in INSERTONLY_TABLE_INDEX;
+}
+
+function makeIndexKey<T extends BitmexTableType>(
+  table: BitmexTable,
+  item: T | Partial<T>,
+  keys: (keyof T & string)[],
+): string {
+  const fallback = 'symbol' in item ? item.symbol as string : '';
+  const indexKeys = table in INSERTONLY_TABLE_INDEX
+    ? [ INSERTONLY_TABLE_INDEX[table] as (keyof T & string) ]
+    : keys;
+
+  return indexKeys.map((k) => item[k]).join('|') || fallback;
 }
