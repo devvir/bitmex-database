@@ -58,7 +58,7 @@ for (const level of book.data) {
 
 ## API
 
-### `createTable(tableName)`
+### `createTable(tableName, capOnInsertOnly)`
 
 Returns a single-table accumulator, typed to the corresponding BitMEX item type.
 
@@ -68,11 +68,17 @@ const book      = createTable('orderBookL2') // Table<OrderBookL2>
 const positions = createTable('position')    // Table<Position>
 ```
 
-### `createDatabase()`
+**Options:**
+- `capOnInsertOnly` (number, default: 10,000) — for insert-only tables, only applies when `wsPartialMode: false`. See below.
+
+### `createDatabase(capOnInsertOnly)`
 
 Returns a multi-table accumulator. Routes each incoming message to the correct internal table automatically.
 
-### `.apply(message)`
+**Options:**
+- `capOnInsertOnly` (number, default: 10,000) — propagated to insert-only tables; only applies when `wsPartialMode: false`. See below.
+
+### `.apply(message, wsPartialMode)`
 
 Accepts any BitMEX WebSocket delta message. A `partial` initialises (or resets) the table; subsequent `insert`, `update`, and `delete` messages are applied incrementally using the table's key fields.
 
@@ -80,6 +86,13 @@ Accepts any BitMEX WebSocket delta message. A `partial` initialises (or resets) 
 table.apply({ table: 'order', action: 'partial', keys: ['orderID'], data: [...] })
 table.apply({ table: 'order', action: 'update',  data: [{ orderID: '...', price: 49500 }] })
 ```
+
+**Options:**
+- `wsPartialMode` (boolean, default: false)
+  - **false** (delta-server accumulation): Insert-only tables accumulate all items, capped at `capOnInsertOnly`.
+  - **true** (websocket partial mode): Insert-only tables keep at most one item per symbol (or one item total if no symbol field). This replicates BitMEX WebSocket behavior for partials on insert-only tables.
+
+**Keyed tables** (with key fields) behave identically in both modes: `insert` adds, `update` modifies in-place, `delete` removes. No cap or pruning of any kind. BitMEX messages fuly drive the state.
 
 ### `.snapshot([table])`
 
@@ -105,6 +118,44 @@ interface TableView<T> {
 ```
 
 Items are typed as `Readonly<T>` — TypeScript will prevent property assignment on them. Note that `Readonly` is shallow; nested objects are not protected.
+
+---
+
+## Modes: Delta Accumulation vs WebSocket Partials
+
+### Delta Accumulation Mode (`wsPartialMode: false`, default)
+
+**Use this for delta servers or slow-updating data.**
+
+- Insert-only tables accumulate **all items** across multiple deltas
+- Items are trimmed to `capOnInsertOnly` when the buffer grows too large
+- Updates and deletes are **ignored** (only inserts matter)
+- Best for tables like `execution`, `funding`, `liquidation` where you want a rolling history
+
+```typescript
+const db = createDatabase()  // capOnInsertOnly defaults to 10,000
+
+db.apply(msg, false)  // delta accumulation
+const executions = db.snapshot(BitmexTable.Execution)  // up to 10,000 items
+```
+
+### WebSocket Partial Mode (`wsPartialMode: true`)
+
+**Use this to match BitMEX WebSocket table semantics (use case: clone/proxy to bypass rate limits).**
+
+- Insert-only tables keep **one item per symbol** (or one item total if no symbol available)
+- Latest item always wins — older items for the same symbol are discarded
+- Updates and deletes are **ignored** (known BitMEX WS bug: it is impossible to update/delete in tables without keys)
+- Best for tables like `trade`, `quote`, `*bin*` where you want the latest snapshot per symbol
+
+```typescript
+const db = createDatabase()
+
+db.apply(msg, true)  // websocket partial mode
+const trades = db.snapshot(BitmexTable.Trade)  // one entry per symbol (e.g., XBTUSD, ETHUSD, ...)
+```
+
+---
 
 ### `BitmexTable`
 

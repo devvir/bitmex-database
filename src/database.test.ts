@@ -7,7 +7,7 @@ import type { BitmexMessage } from './types.js';
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 const partial = (
-  table: string,
+  table: BitmexTable,
   keys: string[],
   data: Record<string, unknown>[]
 ): BitmexMessage => ({
@@ -18,13 +18,13 @@ const partial = (
   data,
 });
 
-const insert = (table: string, data: Record<string, unknown>[]): BitmexMessage => ({
+const insert = (table: BitmexTable, data: Record<string, unknown>[]): BitmexMessage => ({
   table,
   action: 'insert',
   data,
 });
 
-const update = (table: string, data: Record<string, unknown>[]): BitmexMessage => ({
+const update = (table: BitmexTable, data: Record<string, unknown>[]): BitmexMessage => ({
   table,
   action: 'update',
   data,
@@ -36,9 +36,9 @@ describe('Database — routing', () => {
   it('routes messages to the correct internal table', () => {
     const db = createDatabase();
 
-    db.apply(partial('order', ['orderID'], [{ orderID: 'A', price: 100 }]));
-    db.apply(partial('instrument', ['symbol'], [{ symbol: 'XBTUSD', lotSize: 100 }]));
-    db.apply(insert('order', [{ orderID: 'B', price: 200 }]));
+    db.apply(partial(BitmexTable.Order, ['orderID'], [{ orderID: 'A', price: 100 }]));
+    db.apply(partial(BitmexTable.Instrument, ['symbol'], [{ symbol: 'XBTUSD', lotSize: 100 }]));
+    db.apply(insert(BitmexTable.Order, [{ orderID: 'B', price: 200 }]));
 
     const orders = db.snapshot(BitmexTable.Order);
     const instruments = db.snapshot(BitmexTable.Instrument);
@@ -51,7 +51,7 @@ describe('Database — routing', () => {
   it('discards delta for a table that has not received a partial', () => {
     const db = createDatabase();
 
-    db.apply(insert('order', [{ orderID: 'A', price: 100 }]));
+    db.apply(insert(BitmexTable.Order, [{ orderID: 'A', price: 100 }]));
 
     expect(db.snapshot(BitmexTable.Order)).toEqual([]);
   });
@@ -59,8 +59,8 @@ describe('Database — routing', () => {
   it('delta before partial is ignored; partial then works normally', () => {
     const db = createDatabase();
 
-    db.apply(insert('order', [{ orderID: 'X', price: 999 }]));
-    db.apply(partial('order', ['orderID'], [{ orderID: 'A', price: 100 }]));
+    db.apply(insert(BitmexTable.Order, [{ orderID: 'X', price: 999 }]));
+    db.apply(partial(BitmexTable.Order, ['orderID'], [{ orderID: 'A', price: 100 }]));
 
     expect(db.snapshot(BitmexTable.Order)).toHaveLength(1);
     expect(db.snapshot(BitmexTable.Order)[0]).toEqual({ orderID: 'A', price: 100 });
@@ -73,7 +73,7 @@ describe('Database — snapshot()', () => {
   it('snapshot(table) returns items for a specific table', () => {
     const db = createDatabase();
 
-    db.apply(partial('order', ['orderID'], [{ orderID: 'A', price: 100 }]));
+    db.apply(partial(BitmexTable.Order, ['orderID'], [{ orderID: 'A', price: 100 }]));
 
     const snap = db.snapshot(BitmexTable.Order);
 
@@ -89,8 +89,8 @@ describe('Database — snapshot()', () => {
   it('snapshot() (no args) returns all tables that have received a partial', () => {
     const db = createDatabase();
 
-    db.apply(partial('order', ['orderID'], [{ orderID: 'A' }]));
-    db.apply(partial('position', ['symbol'], [{ symbol: 'XBTUSD' }]));
+    db.apply(partial(BitmexTable.Order, ['orderID'], [{ orderID: 'A' }]));
+    db.apply(partial(BitmexTable.Position, ['symbol'], [{ symbol: 'XBTUSD', strategy: '' }]));
 
     const all = db.snapshot();
 
@@ -103,8 +103,8 @@ describe('Database — snapshot()', () => {
   it('snapshot() (no args) does not include tables that never received a partial', () => {
     const db = createDatabase();
 
-    db.apply(partial('order', ['orderID'], [{ orderID: 'A' }]));
-    db.apply(insert('position', [{ symbol: 'XBTUSD' }])); // no prior partial
+    db.apply(partial(BitmexTable.Order, ['orderID'], [{ orderID: 'A' }]));
+    db.apply(insert(BitmexTable.Position, [{ symbol: 'XBTUSD' }])); // no prior partial
 
     const all = db.snapshot();
 
@@ -115,7 +115,7 @@ describe('Database — snapshot()', () => {
   it('snapshot() is a deep copy — mutation does not affect internal state', () => {
     const db = createDatabase();
 
-    db.apply(partial('order', ['orderID'], [{ orderID: 'A', price: 100 }]));
+    db.apply(partial(BitmexTable.Order, ['orderID'], [{ orderID: 'A', price: 100 }]));
 
     const snap = db.snapshot(BitmexTable.Order) as Array<{ orderID: string; price: number }>;
     snap[0]!.price = 999;
@@ -130,11 +130,11 @@ describe('Database — view()', () => {
   it('view(table) returns a live iterable', () => {
     const db = createDatabase();
 
-    db.apply(partial('order', ['orderID'], [{ orderID: 'A', price: 100 }]));
+    db.apply(partial(BitmexTable.Order, ['orderID'], [{ orderID: 'A', price: 100 }]));
 
     const view = db.view(BitmexTable.Order);
 
-    db.apply(insert('order', [{ orderID: 'B', price: 200 }]));
+    db.apply(insert(BitmexTable.Order, [{ orderID: 'B', price: 200 }]));
 
     expect([...view.data]).toHaveLength(2);
   });
@@ -142,7 +142,7 @@ describe('Database — view()', () => {
   it('view(table) table field is the BitmexTable enum value', () => {
     const db = createDatabase();
 
-    db.apply(partial('order', ['orderID'], [{ orderID: 'A' }]));
+    db.apply(partial(BitmexTable.Order, ['orderID'], [{ orderID: 'A' }]));
 
     expect(db.view(BitmexTable.Order).table).toBe(BitmexTable.Order);
   });
@@ -157,7 +157,7 @@ describe('Database — view()', () => {
   it('view().data is re-iterable', () => {
     const db = createDatabase();
 
-    db.apply(partial('order', ['orderID'], [{ orderID: 'A', price: 100 }]));
+    db.apply(partial(BitmexTable.Order, ['orderID'], [{ orderID: 'A', price: 100 }]));
 
     const view = db.view(BitmexTable.Order);
 
@@ -172,13 +172,13 @@ describe('Database — table isolation', () => {
   it('deltas for one table do not affect another', () => {
     const db = createDatabase();
 
-    db.apply(partial('order', ['orderID'], [{ orderID: 'A', price: 100 }]));
-    db.apply(partial('position', ['symbol'], [{ symbol: 'XBTUSD', currentQty: 10 }]));
+    db.apply(partial(BitmexTable.Order, ['orderID'], [{ orderID: 'A', price: 100 }]));
+    db.apply(partial(BitmexTable.Position, ['symbol'], [{ symbol: 'XBTUSD', strategy: '', currentQty: 10 }]));
 
-    db.apply(update('order', [{ orderID: 'A', price: 999 }]));
+    db.apply(update(BitmexTable.Order, [{ orderID: 'A', price: 999 }]));
 
     const positions = db.snapshot(BitmexTable.Position);
 
-    expect(positions[0]).toEqual({ symbol: 'XBTUSD', currentQty: 10 });
+    expect(positions[0]).toEqual({ symbol: 'XBTUSD', strategy: '', currentQty: 10 });
   });
 });
