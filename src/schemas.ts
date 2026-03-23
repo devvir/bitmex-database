@@ -52,7 +52,8 @@ export const tableSchemas: Partial<Record<BitmexTable, ZodType>> = {
   [BitmexTable.QuoteBin1h]: QuoteGetBucketedResponseItem,
   [BitmexTable.QuoteBin1d]: QuoteGetBucketedResponseItem,
   [BitmexTable.Settlement]: SettlementGetResponseItem,
-  [BitmexTable.Trade]: TradeGetResponseItem,
+  // BitMEX spec marks trdMatchID as required, but real data frequently omits it.
+  [BitmexTable.Trade]: TradeGetResponseItem.extend({ trdMatchID: TradeGetResponseItem.shape.trdMatchID.optional() }),
   [BitmexTable.TradeBin1m]: TradeGetBucketedResponseItem,
   [BitmexTable.TradeBin5m]: TradeGetBucketedResponseItem,
   [BitmexTable.TradeBin1h]: TradeGetBucketedResponseItem,

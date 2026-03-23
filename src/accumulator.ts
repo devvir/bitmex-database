@@ -52,6 +52,9 @@ export function applyDelta<T extends BitmexTableType>(
   // Announcement and Chat partials from the BitMEX WebSocket are always empty
   if (wsPartialMode && ['announcement', 'chat'].includes(message.table)) return;
 
+  // BitMEX WebSocket bug: sometimes update and delete messages are sent to tables without keys
+  if (state.keys.length === 0 && message.action !== 'insert') return;
+
   return state.data instanceof Map
     ? applyIndexed(state.data as Map<string, T>, state.keys, message)
     : applyNonIndexed(state.data as T[], message, maxItems);
