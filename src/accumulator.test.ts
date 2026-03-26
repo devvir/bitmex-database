@@ -25,7 +25,7 @@ const partial = (data: Order[]): Extract<OrderMsg, { action: 'partial' }> => ({
   table: BitmexTable.Order,
   action: 'partial',
   keys: ['orderID'] as (keyof Order & string)[],
-  types: { orderID: 'guid', price: 'double', qty: 'int64' },
+  types: { orderID: 'guid', price: 'float', qty: 'long' },
   data,
 } as Extract<OrderMsg, { action: 'partial' }>);
 
@@ -51,7 +51,7 @@ const tradePartial = (data: Trade[]): Extract<TradeMsg, { action: 'partial' }> =
   table: BitmexTable.Trade,
   action: 'partial',
   keys: [] as (keyof Trade & string)[],
-  types: { symbol: 'string', timestamp: 'date-time', price: 'double' },
+  types: { symbol: 'symbol', timestamp: 'timestamp', price: 'float' },
   data,
 });
 

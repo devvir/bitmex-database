@@ -6,13 +6,28 @@ import type { BitmexTable, BitmexTableType, DeltaMessage, PartialMessage, TableS
  * usually keeping only one entry of a kind (symbol or currency). Fallback index for insert-only
  * tables without keys is symbol (if they have it), or finally empty string.
  *
- * Notice that if wsPartialMode=false, insert-only tables will just accumulate up to defined cap.
+ * NOTE: if wsPartialMode=false, these tables will still accumulate normally, up to defined cap.
  */
 const INSERTONLY_TABLE_INDEX = {
   funding: 'symbol',      // Original: timestamp, symbol
   insurance: 'currency',  // Original: timestamp, currency
   settlement: 'symbol',   // Original: timestamp, symbol
 } as Record<BitmexTable, string>;
+
+/**
+ * These tables always yield empty partials from BitMEX upon subscription.
+ *
+ * NOTE: if wsPartialMode=false, these tables will still accumulate normally, up to defined cap.
+ */
+const EMPTY_PARTIALS = [
+  'announcement',
+  'chat',
+  'execution',
+  'leverage',
+  'privateNotifications',
+  'publicNotifications',
+  'transact',
+];
 
 /**
  * Build initial state from a message with action=partial.
@@ -49,8 +64,8 @@ export function applyDelta<T extends BitmexTableType>(
   maxItems: number,
   wsPartialMode: boolean = false,
 ): void {
-  // Announcement and Chat partials from the BitMEX WebSocket are always empty
-  if (wsPartialMode && ['announcement', 'chat'].includes(message.table)) return;
+  // These partials from the BitMEX WebSocket are always empty
+  if (wsPartialMode && EMPTY_PARTIALS.includes(message.table)) return;
 
   // BitMEX WebSocket bug: sometimes update and delete messages are sent to tables without keys
   if (state.keys.length === 0 && message.action !== 'insert') return;
@@ -101,6 +116,9 @@ function applyIndexed<T extends BitmexTableType>(
   keys: (keyof T & string)[],
   message: DeltaMessage<T>,
 ): void {
+  /** For some reason, BitMEX sends updates for new transactions, instead of inserts */
+  const updateShouldBeInsert = message.table === 'transact';
+
   switch (message.action) {
     case 'insert':
       for (const item of message.data)
@@ -112,8 +130,8 @@ function applyIndexed<T extends BitmexTableType>(
         const id = makeIndexKey(message.table, item as Partial<T>, keys);
         const existing = index.get(id);
 
-        if (existing)
-          Object.assign(existing, item);
+        if (existing || updateShouldBeInsert)
+          Object.assign(existing ?? index.set(id, {} as T), item);
         else
           console.warn(`Received update for non-existing item in table ${message.table}.`);
       }

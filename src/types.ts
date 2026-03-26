@@ -6,18 +6,63 @@ type Schema = components['schemas'];
 
 // ── Types for tables that have no REST API equivalent ────────────────────────
 
-/** Connected users summary. Emitted as a partial-only stream on each tick. */
-interface Connected {
-  id: number;
-  users: number;
-  bots: number;
-}
+type Connected = Schema['ConnectedUsers'] & { id: 0 };
 
 /** 10-level aggregated order book (bids/asks as price+size pairs). */
 interface OrderBook10 {
   symbol: string;
   bids: [number, number][];
   asks: [number, number][];
+}
+
+/** WS csastate table — per-account Cross-Margin Support Agreement status. */
+interface CsaState {
+  account:                      number;
+  valuationCurrency?:           string;
+  maintMarginRatio?:            number;
+  maintMarginRatioMarginCall?:  number;
+  maintMarginRatioLiquidation?: number;
+  maintMarginRatioStatus?:      string;
+  marginBalance?:               number;
+  marginBalanceMarginCall?:     number;
+  marginBalanceLiquidation?:    number;
+  marginBalanceStatus?:         string;
+  overallStatus?:               string;
+  liquidationDeadline?:         string;
+  timestamp?:                   string;
+}
+
+/** WS isolation table — per-account per-symbol cross/isolated margin mode. */
+interface Isolation {
+  account:     number;
+  symbol:      string;
+  crossMargin?: boolean;
+}
+
+interface MamAllocationEntry {
+  type:   string;
+  amount: number;
+}
+
+/** WS mamAllocation table — MAM account allocation per margin currency. */
+interface MamAllocation {
+  account:         number;
+  marginCurrency:  string;
+  allocations?:    MamAllocationEntry[];
+  timestamp?:      string;
+}
+
+/** WS voucher table — per-account voucher balances. */
+interface Voucher {
+  account?:        number;
+  voucherId:       string;
+  currency?:       string;
+  balance?:        number;
+  expiry?:         string;
+  voucherType?:    string;
+  transactTime?:   string;
+  timestamp?:      string;
+  masterVoucherId?: string;
 }
 
 // ── Table name enum ───────────────────────────────────────────────────────────
@@ -27,11 +72,15 @@ export enum BitmexTable {
   Affiliate = 'affiliate',
   Chat = 'chat',
   Connected = 'connected',
+  CsaState = 'csastate',
   Execution = 'execution',
+  Isolation = 'isolation',
   Funding = 'funding',
   Instrument = 'instrument',
   Insurance = 'insurance',
+  Leverage = 'leverage',
   Liquidation = 'liquidation',
+  MamAllocation = 'mamAllocation',
   Margin = 'margin',
   Order = 'order',
   OrderBook10 = 'orderBook10',
@@ -52,6 +101,7 @@ export enum BitmexTable {
   TradeBin1h = 'tradeBin1h',
   TradeBin1d = 'tradeBin1d',
   Transact = 'transact',
+  Voucher = 'voucher',
   Wallet = 'wallet',
 }
 
@@ -62,11 +112,15 @@ export type TableTypeMap = {
   [BitmexTable.Affiliate]: Schema['Affiliate'];
   [BitmexTable.Chat]: Schema['Chat'];
   [BitmexTable.Connected]: Connected;
+  [BitmexTable.CsaState]: CsaState;
   [BitmexTable.Execution]: Schema['Execution'];
   [BitmexTable.Funding]: Schema['Funding'];
   [BitmexTable.Instrument]: Schema['Instrument'];
   [BitmexTable.Insurance]: Schema['Insurance'];
+  [BitmexTable.Isolation]: Isolation;
+  [BitmexTable.Leverage]: Schema['Position'];  // WS subset: account, symbol, strategy, leverage
   [BitmexTable.Liquidation]: Schema['Liquidation'];
+  [BitmexTable.MamAllocation]: MamAllocation;
   [BitmexTable.Margin]: Schema['Margin'];
   [BitmexTable.Order]: Schema['Order'];
   [BitmexTable.OrderBook10]: OrderBook10;
@@ -87,6 +141,7 @@ export type TableTypeMap = {
   [BitmexTable.TradeBin1h]: Schema['TradeBin'];
   [BitmexTable.TradeBin1d]: Schema['TradeBin'];
   [BitmexTable.Transact]: Schema['Transaction'];
+  [BitmexTable.Voucher]: Voucher;
   [BitmexTable.Wallet]: Schema['Wallet'];
 };
 
@@ -97,17 +152,17 @@ export type BitmexTableType = TableTypeMap[BitmexTable];
 
 /** The set of field type strings used in the `types` metadata of partial messages. */
 export type BitmexFieldType =
+  | ''          // untyped / used for array-of-objects (e.g. orderBook10.bids)
   | 'boolean'
-  | 'string'
-  | 'number'
-  | 'object'
-  | 'array'
-  | 'date-time'
-  | 'double'
+  | 'float'
   | 'guid'
-  | 'int32'
-  | 'int64'
-  | 'JSON';
+  | 'int'       // e.g. instrument.instrumentID
+  | 'long'
+  | 'object'    // e.g. execution.algoOrderDetails
+  | 'string'
+  | 'symbol'
+  | 'timespan'
+  | 'timestamp';
 
 // ── Message types ─────────────────────────────────────────────────────────────
 
@@ -126,6 +181,7 @@ export type BitmexMessage<T extends BitmexTableType = BitmexTableType> =
       action: 'partial';
       keys: (keyof T & string)[];
       types: Record<keyof T & string, BitmexFieldType>;
+      filter: Record<keyof T & string, unknown>;
       data: T[];
     }
   | {

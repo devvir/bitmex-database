@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { ZodType } from 'zod';
 import {
   AnnouncementGetResponseItem,
@@ -24,6 +25,49 @@ import {
 
 import { BitmexTable } from './types.js';
 
+// ── Bespoke schemas for undocumented / schema-less tables ────────────────────
+
+const CsaStateSchema = z.object({
+  account:                      z.number(),
+  valuationCurrency:            z.string().optional(),
+  maintMarginRatio:             z.number().optional(),
+  maintMarginRatioMarginCall:   z.number().optional(),
+  maintMarginRatioLiquidation:  z.number().optional(),
+  maintMarginRatioStatus:       z.string().optional(),
+  marginBalance:                z.number().optional(),
+  marginBalanceMarginCall:      z.number().optional(),
+  marginBalanceLiquidation:     z.number().optional(),
+  marginBalanceStatus:          z.string().optional(),
+  overallStatus:                z.string().optional(),
+  liquidationDeadline:          z.string().optional(),
+  timestamp:                    z.string().optional(),
+});
+
+const IsolationSchema = z.object({
+  account:     z.number(),
+  symbol:      z.string(),
+  crossMargin: z.boolean().optional(),
+});
+
+const MamAllocationSchema = z.object({
+  account:        z.number(),
+  marginCurrency: z.string(),
+  allocations:    z.array(z.object({ type: z.string(), amount: z.number() })).optional(),
+  timestamp:      z.string().optional(),
+});
+
+const VoucherSchema = z.object({
+  account:         z.number().optional(),
+  voucherId:       z.string(),
+  currency:        z.string().optional(),
+  balance:         z.number().optional(),
+  expiry:          z.string().optional(),
+  voucherType:     z.string().optional(),
+  transactTime:    z.string().optional(),
+  timestamp:       z.string().optional(),
+  masterVoucherId: z.string().optional(),
+});
+
 // ── Table → Zod schema mapping ───────────────────────────────────────────────
 //
 // Maps each BitmexTable to the Zod schema that validates its items.
@@ -34,11 +78,15 @@ export const tableSchemas: Partial<Record<BitmexTable, ZodType>> = {
   [BitmexTable.Affiliate]: UserAffiliatesGetResponseItem,
   [BitmexTable.Chat]: ChatGetResponseItem,
   [BitmexTable.Connected]: ChatGetConnectedResponse,
+  [BitmexTable.CsaState]: CsaStateSchema,
   [BitmexTable.Execution]: ExecutionGetResponseItem,
   [BitmexTable.Funding]: FundingGetResponseItem,
   [BitmexTable.Instrument]: InstrumentGetResponseItem,
   [BitmexTable.Insurance]: InsuranceGetResponseItem,
+  [BitmexTable.Isolation]: IsolationSchema,
+  [BitmexTable.Leverage]: PositionGetResponseItem,
   [BitmexTable.Liquidation]: LiquidationGetResponseItem,
+  [BitmexTable.MamAllocation]: MamAllocationSchema,
   [BitmexTable.Margin]: UserGetMarginResponse,
   [BitmexTable.Order]: OrderGetOrdersResponseItem,
   [BitmexTable.OrderBookL2]: OrderBookGetL2ResponseItem,
@@ -58,5 +106,6 @@ export const tableSchemas: Partial<Record<BitmexTable, ZodType>> = {
   [BitmexTable.TradeBin5m]: TradeGetBucketedResponseItem,
   [BitmexTable.TradeBin1h]: TradeGetBucketedResponseItem,
   [BitmexTable.TradeBin1d]: TradeGetBucketedResponseItem,
+  [BitmexTable.Voucher]: VoucherSchema,
   [BitmexTable.Wallet]: UserGetWalletResponse,
 };
