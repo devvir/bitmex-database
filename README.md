@@ -80,7 +80,9 @@ Returns a multi-table accumulator. Routes each incoming message to the correct i
 
 ### `.apply(message, wsPartialMode)`
 
-Accepts any BitMEX WebSocket delta message. A `partial` initialises (or resets) the table; subsequent `insert`, `update`, and `delete` messages are applied incrementally using the table's key fields.
+Accepts any BitMEX WebSocket delta message. A `partial` initialises or updates the table; subsequent `insert`, `update`, and `delete` messages are applied incrementally using the table's key fields.
+
+When a `partial` arrives for an already-initialised table and carries a non-empty `filter` (e.g. `{ symbol: 'XBTUSD' }`), only entries matching the filter are replaced — entries for other symbols are left intact. This handles the BitMEX pattern of delivering per-symbol snapshots on multi-symbol subscriptions (e.g. `orderBookL2`, `instrument`). An unfiltered `partial` resets the entire table.
 
 ```typescript
 table.apply({ table: 'order', action: 'partial', keys: ['orderID'], data: [...] })

@@ -120,6 +120,45 @@ describe('Table — partial initialisation', () => {
     expect(snap).toHaveLength(1);
     expect(snap[0]).toEqual({ orderID: 'C', price: 300 });
   });
+
+  it('a second partial with a filter replaces only matching entries, leaving others intact', () => {
+    interface Level { symbol: string; id: number; side: string; size: number }
+    type LevelMsg = BitmexMessage<Level>;
+
+    const levelTable = createTable(BitmexTable.OrderBookL2) as unknown as import('./types.js').Table<Level>;
+
+    const bookPartial = (symbol: string, data: Level[]): LevelMsg => ({
+      table: BitmexTable.OrderBookL2,
+      action: 'partial',
+      keys: ['symbol', 'id', 'side'],
+      types: { symbol: 'symbol', id: 'long', side: 'string', size: 'long' },
+      filter: { symbol },
+      data,
+    } as LevelMsg);
+
+    levelTable.apply(bookPartial('XBTUSD', [
+      { symbol: 'XBTUSD', id: 1, side: 'Buy', size: 100 },
+      { symbol: 'XBTUSD', id: 2, side: 'Sell', size: 200 },
+    ]));
+    levelTable.apply(bookPartial('ETHUSD', [
+      { symbol: 'ETHUSD', id: 9, side: 'Buy', size: 50 },
+    ]));
+
+    // Re-partial for XBTUSD only — must not touch ETHUSD
+    levelTable.apply(bookPartial('XBTUSD', [
+      { symbol: 'XBTUSD', id: 1, side: 'Buy', size: 999 },
+      { symbol: 'XBTUSD', id: 3, side: 'Buy', size: 300 },
+    ]));
+
+    const snap = levelTable.snapshot();
+    const byId = new Map(snap.map(l => [`${l.symbol}|${l.id}|${l.side}`, l]));
+
+    expect(snap).toHaveLength(3);
+    expect(byId.get('XBTUSD|1|Buy')?.size).toBe(999);
+    expect(byId.get('XBTUSD|3|Buy')?.size).toBe(300);
+    expect(byId.has('XBTUSD|2|Sell')).toBe(false); // matched filter, dropped
+    expect(byId.get('ETHUSD|9|Buy')?.size).toBe(50); // untouched
+  });
 });
 
 // ── Delta operations ──────────────────────────────────────────────────────────

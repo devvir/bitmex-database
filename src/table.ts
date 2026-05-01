@@ -1,3 +1,4 @@
+import type { ZodType } from 'zod';
 import type {
   BitmexFieldType,
   BitmexMessage,
@@ -8,10 +9,9 @@ import type {
   TableState,
   BitmexTableType,
 } from './types.js';
-import { applyDelta, newState, toIterable, toSnapshot } from './accumulator.js';
+import { applyDelta, toIterable, toSnapshot } from './accumulator.js';
+import { applyPartial } from './partials.js';
 import { tableSchemas } from './schemas.js';
-
-import type { ZodType } from 'zod';
 
 // ── Factory ───────────────────────────────────────────────────────────────────
 
@@ -48,7 +48,7 @@ class Table<T extends BitmexTableType> implements ITable<T> {
     this.#validate(message);
 
     if (message.action === 'partial') {
-      this.#state = newState<T>(message, wsPartialMode);
+      this.#state = applyPartial(this.#state, message, wsPartialMode);
       return;
     }
 

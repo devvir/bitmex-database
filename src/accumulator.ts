@@ -1,18 +1,6 @@
 import cloneDeep from 'lodash.clonedeep';
-import type { BitmexTable, BitmexTableType, DeltaMessage, PartialMessage, TableState } from './types.js';
-
-/**
- * A few insert-only tables have keys, but should still be pruned selectively in wsPartialMode,
- * usually keeping only one entry of a kind (symbol or currency). Fallback index for insert-only
- * tables without keys is symbol (if they have it), or finally empty string.
- *
- * NOTE: if wsPartialMode=false, these tables will still accumulate normally, up to defined cap.
- */
-const INSERTONLY_TABLE_INDEX = {
-  funding: 'symbol',      // Original: timestamp, symbol
-  insurance: 'currency',  // Original: timestamp, currency
-  settlement: 'symbol',   // Original: timestamp, symbol
-} as Record<BitmexTable, string>;
+import type { BitmexTableType, DeltaMessage, TableState } from './types.js';
+import { makeIndexKey } from './keys.js';
 
 /**
  * These tables always yield empty partials from BitMEX upon subscription.
@@ -28,32 +16,6 @@ const EMPTY_PARTIALS = [
   'publicNotifications',
   'transact',
 ];
-
-/**
- * Build initial state from a message with action=partial.
- */
-export function newState<T extends BitmexTableType>(
-  message: PartialMessage<T>,
-  wsPartialMode: boolean = false,
-): TableState<T> {
-  const { table, keys, types, data } = message;
-
-  /** Insert-only tables accumulate (up to max size) in non-wsPartial mode */
-  if (isInsertOnlyTable(table, keys) && ! wsPartialMode)
-    return { table, keys, types, data: data as T[] };
-
-  /**
-   * Tables with update/delete (always), and insert-only tables in wsPartialMode are indexed
-   *   - update/delete: for performant lookups and updates
-   *   - insert-only: for trivial last-item replacement
-   */
-  const index = new Map<string, T>();
-
-  for (const item of data)
-    index.set(makeIndexKey(table, item, keys), item as T);
-
-  return { table, keys, types, data: index };
-}
 
 /**
  * Apply an insert/update/delete delta to existing state. Mutates state in place.
@@ -160,21 +122,4 @@ function applyNonIndexed<T extends BitmexTableType>(data: T[], message: DeltaMes
     data.splice(0, data.length - maxItems);
 }
 
-// ── Private: helpers ──────────────────────────────────────────────────────────
 
-function isInsertOnlyTable(table: BitmexTable, keys: (keyof any & string)[]): boolean {
-  return keys.length === 0 || table in INSERTONLY_TABLE_INDEX;
-}
-
-function makeIndexKey<T extends BitmexTableType>(
-  table: BitmexTable,
-  item: T | Partial<T>,
-  keys: (keyof T & string)[],
-): string {
-  const fallback = 'symbol' in item ? item.symbol as string : '';
-  const indexKeys = table in INSERTONLY_TABLE_INDEX
-    ? [ INSERTONLY_TABLE_INDEX[table] as (keyof T & string) ]
-    : keys;
-
-  return indexKeys.map((k) => item[k]).join('|') || fallback;
-}
